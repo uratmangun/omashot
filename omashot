@@ -8,7 +8,13 @@ SHELL_CONFIG_FILE="$HOME/.config/omarchy/shell.json"
 STATE_DIR="${XDG_STATE_HOME:-$HOME/.local/state}/omashot"
 STATE_FILE="$STATE_DIR/state.json"
 TMP_DIR="${TMPDIR:-/tmp}"
-RECORDING_FILE="/tmp/omarchy-screenrecord-filename"
+# Omarchy's recorder keeps its marker and pid files in the per-user runtime
+# directory (0700). Reading and writing them anywhere else means a region
+# recording is started but can never be found again: --stop-recording reads the
+# pid file to signal, and reads this marker to report the saved filename.
+RUNTIME_DIR="${XDG_RUNTIME_DIR:-${XDG_STATE_HOME:-$HOME/.local/state}/omarchy}"
+RECORDING_FILE="$RUNTIME_DIR/omarchy-screenrecord-filename"
+RECORDING_PID_FILE="$RUNTIME_DIR/omarchy-screenrecord-pid"
 RECORDING_ESCAPE_MARKER="$STATE_DIR/recording-escape-bound"
 RECORDING_CONTEXT_FILE="$STATE_DIR/recording-context.json"
 
@@ -80,8 +86,17 @@ load_shell_settings() {
   TIMER_SECONDS=$(jq -r 'if (.timerSeconds | type) == "number" then .timerSeconds else 0 end' \
     <<<"$PLUGIN_SETTINGS")
   INCLUDE_CURSOR=$(shell_setting_boolean includeCursor)
-  SCREENSHOT_EDITOR=$(shell_setting_string editorCommand "$SCREENSHOT_EDITOR")
-  RECORDING_EDITOR=$(shell_setting_string recordingEditorCommand "$RECORDING_EDITOR")
+  # The per-kind keys win; viewerCommand names one app for both kinds.
+  local screenshot_editor recording_editor viewer_editor
+  screenshot_editor=$(shell_setting_string editorCommand "")
+  recording_editor=$(shell_setting_string recordingEditorCommand "")
+  viewer_editor=$(shell_setting_string viewerCommand "")
+  [[ -n $screenshot_editor ]] && SCREENSHOT_EDITOR="$screenshot_editor"
+  [[ -n $recording_editor ]] && RECORDING_EDITOR="$recording_editor"
+  if [[ -n $viewer_editor ]]; then
+    [[ -n $screenshot_editor ]] || SCREENSHOT_EDITOR="$viewer_editor"
+    [[ -n $recording_editor ]] || RECORDING_EDITOR="$viewer_editor"
+  fi
   DESKTOP_AUDIO=$(shell_setting_boolean recordDesktopAudio)
   MICROPHONE_AUDIO=$(shell_setting_boolean recordMicrophoneAudio)
   WEBCAM=$(shell_setting_boolean recordWebcam)
@@ -531,6 +546,13 @@ notify_capture() {
     command -v omarchy-notification-send >/dev/null 2>&1; then
     local -a exec_args=()
     read -r -a exec_args <<<"$editor"
+    # A configured app that is not installed would otherwise leave the card
+    # with no action at all, so Super + Alt + , would do nothing. Fall back to
+    # the desktop handler, which is what a plain double-click would use.
+    if ((${#exec_args[@]} > 0)) && ! command -v "${exec_args[0]}" >/dev/null 2>&1 &&
+      command -v xdg-open >/dev/null 2>&1; then
+      exec_args=(xdg-open)
+    fi
     if ((${#exec_args[@]} > 0)) && command -v "${exec_args[0]}" >/dev/null 2>&1; then
       local -a send_args=("$title" "$body" -t 10000)
       case "${file,,}" in
@@ -673,6 +695,21 @@ publish_recording_filename() {
   if ! printf '%s\n' "$filename" >"$marker_tmp" ||
     ! mv -fT -- "$marker_tmp" "$RECORDING_FILE"; then
     rm -f -- "$marker_tmp"
+    return 1
+  fi
+}
+
+publish_recording_pid() {
+  local pid="$1" pid_tmp
+
+  # Same atomic, symlink-safe write as the filename marker: Omarchy's stop path
+  # reads this to signal the recorder, so it must be a private regular file.
+  [[ $pid =~ ^[1-9][0-9]*$ ]] || return 1
+  mkdir -p "$RUNTIME_DIR" 2>/dev/null || return 1
+  pid_tmp=$(mktemp -- "${RECORDING_PID_FILE}.XXXXXX") || return 1
+  if ! printf '%s\n' "$pid" >"$pid_tmp" ||
+    ! mv -fT -- "$pid_tmp" "$RECORDING_PID_FILE"; then
+    rm -f -- "$pid_tmp"
     return 1
   fi
 }
@@ -1126,6 +1163,15 @@ record_geometry() {
       remove_recording_escape_binding
       fail "could not publish the recording filename"
     fi
+    # Omarchy's --stop-recording finds the recorder through this pid file and
+    # signals it there. Without it a region recording runs until it is killed
+    # by hand, and no card is posted and no editor opens.
+    if ! publish_recording_pid "$pid"; then
+      kill -INT "$pid" 2>/dev/null || true
+      clear_recording_context
+      remove_recording_escape_binding
+      fail "could not publish the recording pid"
+    fi
     write_state "" "" "$filename"
     target_screen="$SCREEN_NAME"
     [[ -n $target_screen ]] || target_screen=$(screen_name_for_geometry "$selection")
@@ -1207,10 +1253,10 @@ stop_recording() {
     write_state "" "" "$filename"
     # Omarchy's recorder already posted a card for this recording, with mpv as
     # its action. Replace it with one that opens the recording in the editor
-    # the user configured.
+    # the user configured. The card is the only way in: opening the editor here
+    # would take the screen away from whatever the recording was of.
     dismiss_recording_notification
     notify_capture "Recording saved" "$filename" "$filename" "$RECORDING_EDITOR"
-    open_recording_in_omacut "$filename"
   fi
 
   rm -f -- "$STOP_OUTPUT_FILE"
