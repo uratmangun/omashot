@@ -28,8 +28,8 @@ SAVE_LOCATION="pictures"
 TIMER_SECONDS=0
 INCLUDE_CURSOR="false"
 SETTLE_SECONDS="0.15"
-SCREENSHOT_EDITOR="tensaku-edit"
-RECORDING_EDITOR="omacut"
+SCREENSHOT_EDITOR="omaroll"
+RECORDING_EDITOR="omaroll"
 DESKTOP_AUDIO="false"
 MICROPHONE_AUDIO="false"
 WEBCAM="false"
@@ -1083,7 +1083,7 @@ refresh_recording_indicator() {
 open_in_editor() {
   local file="$1" editor="${2:-}"
   [[ -f $file && -s $file ]] || return 0
-  [[ -n $editor ]] || editor="omacut"
+  [[ -n $editor ]] || editor="omaroll"
   # Support full command with args (e.g. "omaroll --flag")
   if [[ "$editor" == *" "* ]]; then
     ( bash -lc "$editor \"\$1\"" _ "$file" ) >/dev/null 2>&1 &
@@ -1097,12 +1097,12 @@ open_in_editor() {
     fi
     return 0
   fi
-  # Fallback to omacut if custom editor not found
-  if [[ "$editor" != "omacut" ]] && command -v omacut >/dev/null 2>&1; then
+  # Fall back to the default viewer when the configured editor is not installed
+  if [[ "$editor" != "omaroll" ]] && command -v omaroll >/dev/null 2>&1; then
     if command -v setsid >/dev/null 2>&1 && command -v uwsm-app >/dev/null 2>&1; then
-      setsid uwsm-app -- omacut "$file" </dev/null >/dev/null 2>&1 &
+      setsid uwsm-app -- omaroll "$file" </dev/null >/dev/null 2>&1 &
     else
-      omacut "$file" </dev/null >/dev/null 2>&1 &
+      omaroll "$file" </dev/null >/dev/null 2>&1 &
     fi
     return 0
   fi

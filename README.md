@@ -52,8 +52,9 @@ Use the full path; `~` and environment variables are not expanded.
 ### Open Captures in Another App
 
 Omashot opens a capture in the app you configure for it: `editorCommand` for
-screenshots and `recordingEditorCommand` for screen recordings. Both are set
-in the `b.omashot` plugin entry in `~/.config/omarchy/shell.json`:
+screenshots and `recordingEditorCommand` for screen recordings. Both default
+to `omaroll`; set them in the `b.omashot` plugin entry in
+`~/.config/omarchy/shell.json` to use something else:
 
 ```json
 {
@@ -65,11 +66,13 @@ in the `b.omashot` plugin entry in `~/.config/omarchy/shell.json`:
 
 With an editor set, Omashot:
 
-* opens the capture in that app when a screen recording finishes,
 * gives the capture notification an action, so clicking the card opens the
   file in that app, and the shell's "invoke last notification" acts on it, and
 * opens the most recent capture (screenshot or recording) with
   `omashot open-last`, in the editor configured for that kind of capture.
+
+A finished recording does not open by itself: the card it posts is the way in,
+so the recording leaves the screen as it was until you click through.
 
 Omarchy's own recorder still posts its own "Recording saved" card, whose
 action opens the recording in mpv. Drop that card so the one Omashot posts
